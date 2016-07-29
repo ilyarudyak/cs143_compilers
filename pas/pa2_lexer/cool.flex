@@ -2,10 +2,9 @@
  *  The scanner definition for COOL.
  */
 
-/*
- *  Stuff enclosed in %{ %} in the first section is copied verbatim to the
- *  output, so headers and global definitions are placed here to be visible
- * to the code in the file.  Don't remove anything that was here initially
+
+/* (1) DECLARATIONS
+ * ======================================================================== 
  */
 %{
 #include <cool-parse.h>
@@ -43,17 +42,26 @@ extern YYSTYPE cool_yylval;
  *  Add Your own definitions here
  */
 
+int string_length = 0;
+
+void addToStr(char* str);
+void resetStr();
+
 %}
 
-/*
- * Define names for regular expressions here.
+/* (2) DEFINITIONS
+ * ======================================================================== 
  */
 
 DARROW        =>
 
-/* keywords from 10.4 of manual. 
-* (?:i) - case insensitive regex.
-*/
+/*  
+ * (?i:) - case insensitive regex.
+ * (?i:ab7)        same as  ([aA][bB]7)
+ * see here: http://flex.sourceforge.net/manual/Patterns.html
+ * List of keywords is from Manual, 10.4
+ */
+
 CLASS         (?i:class)
 ELSE          (?i:else)
 FALSE         f(?i:alse)
@@ -74,11 +82,27 @@ OF            (?i:of)
 NOT           (?i:not)
 TRUE          t(?i:rue)
 
+/*
+ * start conditions
+ */
+
+%x STRING
+%x COMMENT
+
+
+/* (3) RULES
+ * ======================================================================== 
+ */
+
 %%
 
  /*
   *  Nested comments
   */
+
+"(*".*          { curr_lineno++; }
+"--".*\n        { curr_lineno++; }  
+"--".*          { curr_lineno++; }  
 
 
  /*
@@ -88,7 +112,7 @@ TRUE          t(?i:rue)
 
  /*
   * Keywords are case-insensitive except for the values true and false,
-  * which must begin with a lower-case letter.
+  * which must begin with a lower-case letter (Manual, 10.4).
   */
 
 {CLASS}       { return CLASS; }
@@ -120,15 +144,32 @@ TRUE          t(?i:rue)
 
  /*
   *  String constants (C syntax)
-  *  Escape sequence \c is accepted for all characters c. Except for 
+  *  (1) Strings are enclosed in double quotes "...".
+  *  (2) Escape sequence \c is accepted for all characters c. Except for 
   *  \n \t \b \f, the result is c.
+  *  (3) A non-escaped newline character may not appear in a string.
+  *  (4) A string may not contain EOF. 
+  *  (5) A string may not contain the null (character \0).
   *
   */
 
-/*
-  *  Catching all the rest including whitespace
-  *
-  */
+\"            { 
+                    // opening tag "
+                    BEGIN(STRING);
+              }
+<STRING>\"    { 
+                    // closing tag "
+                    cool_yylval.symbol = stringtable.add_string(string_buf);
+                    resetStr();
+                    BEGIN(INITIAL);
+                    return(STR_CONST);
+              }
+<STRING>.     {   
+                    addToStr(yytext);
+                    string_length++;
+              }
+
+
 
 
 \n          { curr_lineno++; }
@@ -143,9 +184,18 @@ TRUE          t(?i:rue)
 
 %%
 
+/* (4) USER SUBROUTINES
+ * ======================================================================== 
+ */
 
+void addToStr(char* str) {
+    strcat(string_buf, str);
+}
 
-
+void resetStr() {
+    string_length = 0;
+    string_buf[0] = '\0';
+}
 
 
 
