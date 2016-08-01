@@ -1,11 +1,11 @@
-/*
- *  The scanner definition for COOL.
- */
+ /*
+  *  The scanner definition for COOL.
+  */
 
 
-/* (1) DECLARATIONS
- * ======================================================================== 
- */
+ /* (1) DECLARATIONS
+  * ======================================================================== 
+  */
 %{
 #include <cool-parse.h>
 #include <stringtab.h>
@@ -42,25 +42,33 @@ extern YYSTYPE cool_yylval;
  *  Add Your own definitions here
  */
 
+int comment_depth;
 int string_length = 0;
 
-void addToStr(char* str);
+bool strTooLong();
 void resetStr();
+int strLenErr();
+void addToStr(char* str);
 
 %}
 
-/* (2) DEFINITIONS
- * ======================================================================== 
- */
+ /* (2) DEFINITIONS
+  * ======================================================================== 
+  */
 
 DARROW        =>
+ASSIGN        <-
+LE            <=
+OTHER_SN      [{};:,\.()<=\+\-~@\*/]
+NUMBER          [0-9]
+ALPHANUMERIC    [a-zA-Z0-9_]
 
-/*  
- * (?i:) - case insensitive regex.
- * (?i:ab7)        same as  ([aA][bB]7)
- * see here: http://flex.sourceforge.net/manual/Patterns.html
- * List of keywords is from Manual, 10.4
- */
+ /*  
+  * (?i:) - case insensitive regex.
+  * (?i:ab7)        same as  ([aA][bB]7)
+  * see here: http://flex.sourceforge.net/manual/Patterns.html
+  * List of keywords is from Manual, 10.4
+  */
 
 CLASS         (?i:class)
 ELSE          (?i:else)
@@ -82,37 +90,68 @@ OF            (?i:of)
 NOT           (?i:not)
 TRUE          t(?i:rue)
 
-/*
- * start conditions
- */
+ /*
+  * start conditions
+  */
 
-%x STRING
 %x COMMENT
+%x STRING
+%x BROKENSTRING
 
 
-/* (3) RULES
- * ======================================================================== 
- */
+
+ /* (3) RULES
+  * ======================================================================== 
+  */
 
 %%
 
  /*
-  *  Nested comments
+  *  Nested comments. We're using example from:
+  *  http://flex.sourceforge.net/manual/Start-Conditions.html
   */
 
-"(*".*          { curr_lineno++; }
-"--".*\n        { curr_lineno++; }  
-"--".*          { curr_lineno++; }  
+<INITIAL,COMMENT>"(*"                    { 
+                          comment_depth++;
+                          BEGIN(COMMENT); 
+                        }
+ /* eat up everything except newline */
+<COMMENT>.              { }
+<COMMENT>\n             { curr_lineno++; }
+<COMMENT>"*)"           { 
+                          comment_depth--;
+                          if (comment_depth == 0) {
+                            BEGIN(INITIAL); 
+                          }
+                        }
+<COMMENT><<EOF>>        {   
+                          BEGIN(INITIAL);
+                          cool_yylval.error_msg = "EOF in comment";
+                          return ERROR;
+                        }
+<INITIAL>"*)"           { 
+                          cool_yylval.error_msg = "unmatched *)";
+                          return ERROR;
+                        } 
+
+  /* discard comments */
+"--".*\n                { curr_lineno++; }  
+"--".*                  { curr_lineno++; }  
 
 
  /*
   *  The multiple-character operators.
   */
-{DARROW}    { return (DARROW); }
+{DARROW}    { return DARROW; }
+{ASSIGN}    { return ASSIGN; }
+{LE}        { return LE; }
+{OTHER_SN}  { return (char)*yytext; }
+
 
  /*
   * Keywords are case-insensitive except for the values true and false,
-  * which must begin with a lower-case letter (Manual, 10.4).
+  * which must begin with a lower-case letter 
+  * (Manual, 10.4).
   */
 
 {CLASS}       { return CLASS; }
@@ -141,6 +180,28 @@ TRUE          t(?i:rue)
                 return(BOOL_CONST);
               }
 
+ /*
+  * Identifiers are strings (other than keywords) consisting 
+  * of letters, digits, and the underscore character. 
+  * Type identifiers begin with a capital letter; 
+  * object identifiers begin with a lower case letter.
+  */ 
+
+{NUMBER}+               {
+                          cool_yylval.symbol = inttable.add_string(yytext);
+                          return (INT_CONST);
+                        }
+
+[A-Z]{ALPHANUMERIC}*    {
+                          cool_yylval.symbol = idtable.add_string(yytext);
+                          return(TYPEID);
+                        }
+
+[a-z]{ALPHANUMERIC}*    {
+                          cool_yylval.symbol = idtable.add_string(yytext);
+                          return(OBJECTID);
+                        }
+ 
 
  /*
   *  String constants (C syntax)
@@ -149,32 +210,99 @@ TRUE          t(?i:rue)
   *  \n \t \b \f, the result is c.
   *  (3) A non-escaped newline character may not appear in a string.
   *  (4) A string may not contain EOF. 
-  *  (5) A string may not contain the null (character \0).
-  *
+  *  (5) A string may not contain the null (character \0). 
+  *  (Manual, 10.2)
   */
 
 \"            { 
-                    // opening tag "
+                    // "starting tag
                     BEGIN(STRING);
-              }
+                }
 <STRING>\"    { 
-                    // closing tag "
+                    // Closing tag"
                     cool_yylval.symbol = stringtable.add_string(string_buf);
                     resetStr();
                     BEGIN(INITIAL);
                     return(STR_CONST);
-              }
-<STRING>.     {   
+                }
+<STRING>(\0|\\\0) {
+                      cool_yylval.error_msg = "String contains null character";
+                      BEGIN(BROKENSTRING);
+                      return(ERROR);
+                }
+<BROKENSTRING>.*[\"\n] {
+                    //"//Get to the end of broken string
+                    BEGIN(INITIAL);
+                }
+<STRING>\\\n      {   
+                    // escaped slash
+                    // printf("captured: %s\n", yytext);
+                    if (strTooLong()) { return strLenErr(); }
+                    curr_lineno++; 
+                    addToStr("\n");
+                    string_length++;
+                    // printf("buffer: %s\n", string_buf);
+                }
+<STRING>\n      {   
+                    // unescaped new line
+                    curr_lineno++; 
+                    BEGIN(INITIAL);
+                    resetStr();
+                    cool_yylval.error_msg = "Unterminated string constant";
+                    return(ERROR);
+                }
+
+<STRING><<EOF>> {   
+                    BEGIN(INITIAL);
+                    cool_yylval.error_msg = "EOF in string constant";
+                    return(ERROR);
+                }
+
+<STRING>\\n      {  // escaped slash, then an n
+                    if (strTooLong()) { return strLenErr(); }
+                    curr_lineno++; 
+                    addToStr("\n");
+                }
+
+<STRING>\\t     {
+                    if (strTooLong()) { return strLenErr(); }
+                    string_length++;
+                    addToStr("\t");
+}
+<STRING>\\b     {
+                    if (strTooLong()) { return strLenErr(); }
+                    string_length++;
+                    addToStr("\b");
+}
+<STRING>\\f     {
+                    if (strTooLong()) { return strLenErr(); }
+                    string_length++;
+                    addToStr("\f");
+}
+<STRING>\\.     {
+                    //escaped character, just add the character
+                    if (strTooLong()) { return strLenErr(); }
+                    string_length++;
+                    addToStr(&strdup(yytext)[1]);
+                }
+<STRING>.       {   
+                    if (strTooLong()) { return strLenErr(); }
                     addToStr(yytext);
                     string_length++;
-              }
+                }
 
+ /*
+  *  Catching all the rest including whitespace
+  *
+  */
 
-
-
+ /* catch empty lines */
 \n          { curr_lineno++; }
 
+ /* catch white space */
 [ \r\t\v\f] { }
+
+ /* everything else is an error */
 
 .           {
               cool_yylval.error_msg = yytext;
@@ -184,17 +312,31 @@ TRUE          t(?i:rue)
 
 %%
 
-/* (4) USER SUBROUTINES
- * ======================================================================== 
- */
+ /* (4) USER SUBROUTINES
+  * ======================================================================== 
+  */
 
 void addToStr(char* str) {
     strcat(string_buf, str);
 }
 
+bool strTooLong() {
+  if (string_length + 1 >= MAX_STR_CONST) {
+      BEGIN(BROKENSTRING);
+      return true;
+    }
+    return false;
+}
+
 void resetStr() {
     string_length = 0;
     string_buf[0] = '\0';
+}
+
+int strLenErr() {
+  resetStr();
+    cool_yylval.error_msg = "String constant too long";
+    return ERROR;
 }
 
 

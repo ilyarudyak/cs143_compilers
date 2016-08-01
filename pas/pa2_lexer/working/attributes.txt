@@ -1,0 +1,19 @@
+Return values and attributes for tokens*
+-----------------------------------------
+
+  lexical structure       return value      attribute
+
+  - integers              token 
+  - identifiers
+  - special notation      token**           n/a
+  - strings
+  - comments              n/a               n/a 
+  - keywords              token             n/a except booleans: 
+                                            cool_yylval.boolean = true (false)
+  - error
+
+
+----------------------------------
+*)  Tokens are from cool-parse.h.
+**) Only for DARROW, ASSIGN and LE; for other notation return its char value.
+    

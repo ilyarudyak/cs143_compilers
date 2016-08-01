@@ -1,0 +1,62 @@
+(1) integers, identifiers and special notations*
+-------------------------------------------------
+
+#define INT_CONST 276
+
+#define LET_STMT 285
+
+#define TYPEID 278
+#define OBJECTID 279
+#define ISVOID 274
+
+  - it seems only *few* special notations have tokens
+
+#define DARROW 272
+#define ASSIGN 280
+#define LE 282
+
+
+(2) strings
+-------------
+
+#define STR_CONST 275
+
+(3) comments
+-------------
+
+n/a
+
+(4) keywords
+-------------
+
+#define CLASS 258
+#define ELSE 259
+#define BOOL_CONST 277
+#define FI 260
+#define IF 261
+#define IN 262
+#define INHERITS 263
+#define LET 264
+#define LOOP 265
+#define POOL 266
+#define THEN 267
+#define WHILE 268
+#define CASE 269
+#define ESAC 270
+#define NEW 273
+#define OF 271
+#define NOT 281
+
+(5) whitespace
+----------------
+
+n/a
+
+error
+------
+
+#define ERROR 283
+
+----------------------------------------------------------
+*)  Tokens are from cool-parse.h.
+    Numeration is the same as in The Cool Reference Manual, part 10.
